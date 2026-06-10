@@ -87,10 +87,10 @@ async function createTables() {
 
 async function seedUsers() {
   const users = [
-    { username: 'andrei', password: 'password' },
-    { username: 'maria', password: 'password' },
-    { username: 'alex', password: 'password' },
-    { username: 'bianca', password: 'password' }
+    { username: 'andrei', password: 'andreiyes' },
+    { username: 'stefania', password: 'password123' },
+    { username: 'alex', password: 'myPassword' },
+    { username: 'maria', password: 'Birthday29' }
   ];
 
   for (const user of users) {
