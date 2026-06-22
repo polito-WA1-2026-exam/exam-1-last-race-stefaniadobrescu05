@@ -64,6 +64,8 @@ async function createTables() {
       initial_coins INTEGER NOT NULL DEFAULT 20,
       final_score INTEGER NOT NULL,
       created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'in_progress',
+      completed_at TEXT,
       FOREIGN KEY (user_id) REFERENCES users(id),
       FOREIGN KEY (start_station_id) REFERENCES stations(id),
       FOREIGN KEY (destination_station_id) REFERENCES stations(id)
@@ -332,7 +334,7 @@ await createTables();
 await seedUsers();
 await seedNetwork();
 await seedEvents();
-await seedGames();
+// Demo games are intentionally not seeded: ranking includes completed real games only.
 
 console.log('Database created and seeded successfully.');
 

@@ -1,11 +1,48 @@
 import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
+import crypto from 'crypto';
 
 async function getDb() {
-  return open({
+  const db = await open({
     filename: './last-race.db',
     driver: sqlite3.Database
   });
+
+  await ensureGameCompletionColumns(db);
+  return db;
+}
+
+// Keep existing databases compatible while new databases get these columns from init-db.js.
+async function ensureGameCompletionColumns(db) {
+  const columns = await db.all('PRAGMA table_info(games)');
+
+  if (columns.length === 0) {
+    return;
+  }
+
+  const columnNames = new Set(columns.map((column) => column.name));
+  let addedStatusColumn = false;
+
+  if (!columnNames.has('status')) {
+    await db.exec("ALTER TABLE games ADD COLUMN status TEXT NOT NULL DEFAULT 'in_progress'");
+    addedStatusColumn = true;
+  }
+
+  if (!columnNames.has('completed_at')) {
+    await db.exec('ALTER TABLE games ADD COLUMN completed_at TEXT');
+  }
+
+  if (addedStatusColumn) {
+    // The first four records are the optional demo games created by the old seed script.
+    await db.run("UPDATE games SET status = 'demo' WHERE id BETWEEN 1 AND 4");
+    // Real games already executed before this migration have persisted execution steps.
+    await db.run(`
+      UPDATE games
+      SET status = 'completed', completed_at = created_at
+      WHERE status = 'in_progress'
+        AND EXISTS (SELECT 1 FROM game_steps WHERE game_steps.game_id = games.id)
+    `);
+  }
 }
 
 export async function getEvents() {
@@ -27,11 +64,13 @@ export async function getRanking() {
   const ranking = await db.all(`
     SELECT 
       users.username,
-      MAX(games.final_score) AS best_score
+        MAX(games.final_score) AS bestScore
     FROM games
-    JOIN users ON games.user_id = users.id
+      JOIN users ON games.user_id = users.id
+    WHERE games.status = 'completed'
+      AND games.completed_at IS NOT NULL
     GROUP BY users.id, users.username
-    ORDER BY best_score DESC
+      ORDER BY bestScore DESC
   `);
 
   await db.close();
@@ -81,7 +120,9 @@ export async function getNetwork() {
         from_station_id: stationsOnLine[i].station_id,
         from_station_name: stationsOnLine[i].station_name,
         to_station_id: stationsOnLine[i + 1].station_id,
-        to_station_name: stationsOnLine[i + 1].station_name
+        to_station_name: stationsOnLine[i + 1].station_name,
+        // The pair is stored once, but it can be travelled in either direction.
+        bidirectional: true
       });
     }
   }
@@ -106,4 +147,303 @@ export async function getNetwork() {
     connections,
     interchangeStations
   };
+}
+
+// Breadth-first search finds the fewest segments between two stations.
+function getShortestDistance(startStationId, destinationStationId, connections) {
+  const graph = new Map();
+
+  for (const connection of connections) {
+    const from = connection.from_station_id;
+    const to = connection.to_station_id;
+
+    if (!graph.has(from)) graph.set(from, []);
+    if (!graph.has(to)) graph.set(to, []);
+    graph.get(from).push(to);
+    graph.get(to).push(from);
+  }
+
+  const queue = [{ stationId: startStationId, distance: 0 }];
+  const visited = new Set([startStationId]);
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+
+    if (current.stationId === destinationStationId) {
+      return current.distance;
+    }
+
+    for (const neighbour of graph.get(current.stationId) || []) {
+      if (!visited.has(neighbour)) {
+        visited.add(neighbour);
+        queue.push({ stationId: neighbour, distance: current.distance + 1 });
+      }
+    }
+  }
+
+  return null;
+}
+
+export async function createGame(userId) {
+  const network = await getNetwork();
+  const stations = Array.isArray(network.stations) ? network.stations : [];
+  const connections = Array.isArray(network.connections) ? network.connections : [];
+  const validPairs = [];
+
+  for (const startStation of stations) {
+    for (const destinationStation of stations) {
+      if (startStation.id === destinationStation.id) continue;
+
+      const distance = getShortestDistance(
+        startStation.id,
+        destinationStation.id,
+        connections
+      );
+
+      if (distance !== null && distance >= 3) {
+        validPairs.push({ startStation, destinationStation });
+      }
+    }
+  }
+
+  if (validPairs.length === 0) {
+    return null;
+  }
+
+  const selectedPair = validPairs[Math.floor(Math.random() * validPairs.length)];
+  const db = await getDb();
+
+  // final_score is required by the existing schema; scoring will update it later.
+  const result = await db.run(
+    `INSERT INTO games
+      (user_id, start_station_id, destination_station_id, initial_coins, final_score, created_at, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      userId,
+      selectedPair.startStation.id,
+      selectedPair.destinationStation.id,
+      20,
+      20,
+      new Date().toISOString(),
+      'in_progress'
+    ]
+  );
+
+  await db.close();
+
+  return {
+    gameId: result.lastID,
+    startStation: selectedPair.startStation,
+    destinationStation: selectedPair.destinationStation,
+    segments: connections
+  };
+}
+
+function invalidRoute(message) {
+  return { valid: false, finalScore: 0, message };
+}
+
+async function saveFinalScore(gameId, finalScore) {
+  const db = await getDb();
+  await db.run(
+    "UPDATE games SET final_score = ?, status = 'invalid', completed_at = NULL WHERE id = ?",
+    [finalScore, gameId]
+  );
+  await db.close();
+}
+
+async function saveExecutionResult(gameId, finalScore, executionSteps) {
+  const db = await getDb();
+
+  await db.run(
+    "UPDATE games SET final_score = ?, status = 'completed', completed_at = ? WHERE id = ?",
+    [finalScore, new Date().toISOString(), gameId]
+  );
+  await db.run('DELETE FROM game_steps WHERE game_id = ?', [gameId]);
+
+  for (const step of executionSteps) {
+    await db.run(
+      `INSERT INTO game_steps
+        (game_id, from_station_id, to_station_id, event_id, coins_after_step, step_order)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        gameId,
+        step.fromStationId,
+        step.toStationId,
+        step.eventId,
+        step.coinsAfterStep,
+        step.stepOrder
+      ]
+    );
+  }
+
+  await db.close();
+}
+
+export async function validateRoute(gameId, userId, selectedSegments) {
+  const db = await getDb();
+  const game = await db.get(
+    `SELECT id, start_station_id, destination_station_id
+     FROM games
+     WHERE id = ? AND user_id = ?`,
+    [gameId, userId]
+  );
+  await db.close();
+
+  if (!game) {
+    return invalidRoute('Game not found or not owned by the current user.');
+  }
+
+  async function invalidForGame(message) {
+    await saveFinalScore(game.id, 0);
+    return invalidRoute(message);
+  }
+
+  if (!Array.isArray(selectedSegments) || selectedSegments.length === 0) {
+    return invalidForGame('Select at least one segment before submitting the route.');
+  }
+
+  const network = await getNetwork();
+  const connections = network.connections;
+  const stationNames = new Map(network.stations.map((station) => [station.id, station.name]));
+  const lineNames = new Map(network.lines.map((line) => [line.id, line.name]));
+  const interchangeIds = new Set(
+    network.interchangeStations.map((station) => station.id)
+  );
+  const validatedSegments = [];
+  const usedPhysicalSegments = new Set();
+
+  for (const selectedSegment of selectedSegments) {
+    const lineId = Number(selectedSegment?.line_id);
+    const fromStationId = Number(selectedSegment?.from_station_id);
+    const toStationId = Number(selectedSegment?.to_station_id);
+
+    if (!Number.isInteger(lineId) || !Number.isInteger(fromStationId) || !Number.isInteger(toStationId)) {
+      return invalidForGame('A selected segment has invalid station or line data.');
+    }
+
+    // Match either direction against the one stored physical connection.
+    const connection = connections.find((item) =>
+      item.line_id === lineId &&
+      ((item.from_station_id === fromStationId && item.to_station_id === toStationId) ||
+        (item.from_station_id === toStationId && item.to_station_id === fromStationId))
+    );
+
+    if (!connection) {
+      return invalidForGame('A selected segment does not exist in the metro network.');
+    }
+
+    const physicalSegmentKey = `${lineId}-${Math.min(fromStationId, toStationId)}-${Math.max(fromStationId, toStationId)}`;
+
+    if (usedPhysicalSegments.has(physicalSegmentKey)) {
+      return invalidForGame('The same physical segment cannot be used more than once.');
+    }
+
+    usedPhysicalSegments.add(physicalSegmentKey);
+    validatedSegments.push({ lineId, fromStationId, toStationId });
+  }
+
+  if (validatedSegments[0].fromStationId !== game.start_station_id) {
+    return invalidForGame('The first segment must start at the assigned start station.');
+  }
+
+  if (validatedSegments.at(-1).toStationId !== game.destination_station_id) {
+    return invalidForGame('The last segment must end at the assigned destination station.');
+  }
+
+  for (let index = 1; index < validatedSegments.length; index += 1) {
+    const previousSegment = validatedSegments[index - 1];
+    const currentSegment = validatedSegments[index];
+
+    if (previousSegment.toStationId !== currentSegment.fromStationId) {
+      return invalidForGame('Selected segments must form one continuous route.');
+    }
+
+    if (
+      previousSegment.lineId !== currentSegment.lineId &&
+      !interchangeIds.has(previousSegment.toStationId)
+    ) {
+      return invalidForGame('Metro lines can only be changed at an interchange station.');
+    }
+  }
+
+  const events = await getEvents();
+
+  if (events.length === 0) {
+    throw new Error('No events are available for game execution.');
+  }
+
+  let coins = 20;
+  const executionSteps = validatedSegments.map((segment, index) => {
+    const event = events[Math.floor(Math.random() * events.length)];
+    coins = Math.max(0, coins + event.effect);
+
+    return {
+      fromStationId: segment.fromStationId,
+      toStationId: segment.toStationId,
+      lineId: segment.lineId,
+      eventId: event.id,
+      eventDescription: event.description,
+      effect: event.effect,
+      coinsAfterStep: coins,
+      stepOrder: index + 1
+    };
+  });
+
+  const finalScore = Math.max(0, coins);
+  await saveExecutionResult(game.id, finalScore, executionSteps);
+
+  return {
+    valid: true,
+    finalScore,
+    executionSteps: executionSteps.map((step) => ({
+      from: stationNames.get(step.fromStationId),
+      to: stationNames.get(step.toStationId),
+      line: lineNames.get(step.lineId),
+      eventDescription: step.eventDescription,
+      effect: step.effect,
+      coinsAfterStep: step.coinsAfterStep
+    })),
+    message: 'Route is valid. Execution phase will be implemented next.'
+  };
+}
+
+// Only select fields that are safe to attach to req.user or send to the client.
+export async function getUserById(id) {
+  const db = await getDb();
+  const user = await db.get(
+    'SELECT id, username FROM users WHERE id = ?',
+    [id]
+  );
+
+  await db.close();
+  return user;
+}
+
+// Password hashes and salts stay inside this function and are never returned.
+export async function verifyUserCredentials(username, password) {
+  const db = await getDb();
+  const user = await db.get(
+    `SELECT id, username, password_hash, salt
+     FROM users
+     WHERE username = ?`,
+    [username]
+  );
+
+  await db.close();
+
+  if (!user) {
+    return null;
+  }
+
+  const passwordHash = crypto
+    .pbkdf2Sync(password, user.salt, 100000, 64, 'sha512')
+    .toString('hex');
+
+  const passwordsMatch = crypto.timingSafeEqual(
+    Buffer.from(passwordHash, 'hex'),
+    Buffer.from(user.password_hash, 'hex')
+  );
+
+  return passwordsMatch ? { id: user.id, username: user.username } : null;
 }
