@@ -31,7 +31,29 @@ function HomePage() {
 }
 
 function InstructionsPage() {
-  return <section className="content-card instructions-card"><p className="eyebrow">How to play</p><h1>Race across the metro.</h1><ol className="instructions-list"><li>Start with the coins assigned at the beginning of the race.</li><li>Choose a connected station to continue your journey.</li><li>After each move, an event can add or remove coins.</li><li>Reach your destination with the best score you can.</li><li>Compare your best result with other players in the ranking.</li></ol></section>
+  return (
+    <section className="content-card instructions-card">
+      <p className="eyebrow">How to play</p>
+      <h1>Race across the metro</h1>
+      <p className="rules-goal">Your goal is to build a valid metro route from the assigned starting station to the assigned destination station before time runs out.</p>
+      <h2>Rules</h2>
+      <ol className="instructions-list">
+        <li>Each game starts with 20 coins.</li>
+        <li>First, you can study the full metro network with all stations, connections, and lines.</li>
+        <li>During the planning phase, you have 90 seconds to select the segments of your route in order.</li>
+        <li>Your route must start from the assigned starting station.</li>
+        <li>Your route must end at the assigned destination station.</li>
+        <li>Every selected segment must be connected to the previous one, forming one continuous path.</li>
+        <li>You may pass through the same station more than once.</li>
+        <li>You may not use the same segment more than once, even in the opposite direction.</li>
+        <li>Line changes are allowed only at interchange stations.</li>
+        <li>If the timer expires, the route built so far is submitted automatically.</li>
+        <li>If the route is invalid or incomplete, the journey is skipped and your final score is 0.</li>
+        <li>If the route is valid, random events happen during each segment and may add or remove coins.</li>
+        <li>The final score is the number of coins left at the end. If the score becomes negative, it is shown as 0.</li>
+      </ol>
+    </section>
+  )
 }
 
 function GamePage() {
@@ -131,7 +153,11 @@ function GamePage() {
         <p className="eyebrow">Route not completed</p>
         <h1>Selected route is invalid.</h1>
         <CoinAmount className="result-coins">0 coins</CoinAmount>
-        <p className="failure-reason">{failureResult.message || 'The selected route could not be validated.'}</p>
+        <ul className="failure-reasons">
+          {(Array.isArray(failureResult.reasons) ? failureResult.reasons : [failureResult.message || 'The selected route could not be validated.']).map((reason, index) => (
+            <li key={`${reason}-${index}`}>{reason}</li>
+          ))}
+        </ul>
         <button className="primary-button" type="button" onClick={resetGame}>Start new game</button>
       </section>
     )

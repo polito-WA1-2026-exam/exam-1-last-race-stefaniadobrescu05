@@ -53,10 +53,6 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
     const segmentKey = getSegmentKey(segment, index)
 
     setSelectedSegments((currentSegments) => {
-      if (currentSegments.some((currentSegment) => currentSegment.key === segmentKey)) {
-        return currentSegments
-      }
-
       const directedSegment = isReversed
         ? {
             ...segment,
@@ -67,7 +63,10 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
           }
         : segment
 
-      return [...currentSegments, { ...directedSegment, key: segmentKey }]
+      return [...currentSegments, {
+        ...directedSegment,
+        key: `${segmentKey}-${currentSegments.length}-${Date.now()}`,
+      }]
     })
   }
 
@@ -176,6 +175,7 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
           </section>
           <section className="planning-section">
             <h2>Your selected route</h2>
+            <p className="planning-warning">Be careful: the game may let you select disconnected segments, start from the wrong station, end at the wrong station, or reuse a segment, but submitting such a route will make it invalid or incomplete and your score will be 0.</p>
             <SelectedRoute selectedSegments={selectedSegments} />
             <div className="route-actions">
               <button className="secondary-button" type="button" onClick={undoLastSegment} disabled={selectedSegments.length === 0}>Undo last segment</button>
@@ -189,19 +189,16 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
             <ul className="segment-list">
               {segments.map((segment, index) => {
                 const segmentKey = getSegmentKey(segment, index)
-                const isSelected = selectedSegments.some((selectedSegment) => selectedSegment.key === segmentKey)
 
                 return [
                   <li className="segment-card" key={`${segmentKey}-forward`}>
-                    <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, false)} disabled={isSelected} aria-pressed={isSelected}>
+                    <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, false)}>
                       <span>{segment?.from_station_name || 'Unknown'} - {segment?.to_station_name || 'Unknown'}</span>
-                      {isSelected && <span className="selected-segment-note">Selected</span>}
                     </button>
                   </li>,
                   <li className="segment-card" key={`${segmentKey}-reverse`}>
-                    <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, true)} disabled={isSelected} aria-pressed={isSelected}>
+                    <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, true)}>
                       <span>{segment?.to_station_name || 'Unknown'} - {segment?.from_station_name || 'Unknown'}</span>
-                      {isSelected && <span className="selected-segment-note">Selected</span>}
                     </button>
                   </li>,
                 ]

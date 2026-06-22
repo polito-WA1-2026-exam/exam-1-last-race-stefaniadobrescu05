@@ -239,8 +239,15 @@ export async function createGame(userId) {
   };
 }
 
-function invalidRoute(message) {
-  return { valid: false, finalScore: 0, message };
+function invalidRoute(reasons) {
+  const reasonList = Array.isArray(reasons) ? reasons : [reasons];
+
+  return {
+    valid: false,
+    finalScore: 0,
+    message: reasonList[0],
+    reasons: reasonList
+  };
 }
 
 async function saveFinalScore(gameId, finalScore) {
@@ -294,9 +301,9 @@ export async function validateRoute(gameId, userId, selectedSegments) {
     return invalidRoute('Game not found or not owned by the current user.');
   }
 
-  async function invalidForGame(message) {
+  async function invalidForGame(reasons) {
     await saveFinalScore(game.id, 0);
-    return invalidRoute(message);
+    return invalidRoute(reasons);
   }
 
   if (!Array.isArray(selectedSegments) || selectedSegments.length === 0) {
@@ -312,14 +319,19 @@ export async function validateRoute(gameId, userId, selectedSegments) {
   );
   const validatedSegments = [];
   const usedPhysicalSegments = new Set();
+  const reasons = [];
+  let hasDisconnectedSegments = false;
 
-  for (const selectedSegment of selectedSegments) {
+  for (let index = 0; index < selectedSegments.length; index += 1) {
+    const selectedSegment = selectedSegments[index];
     const lineId = Number(selectedSegment?.line_id);
     const fromStationId = Number(selectedSegment?.from_station_id);
     const toStationId = Number(selectedSegment?.to_station_id);
 
     if (!Number.isInteger(lineId) || !Number.isInteger(fromStationId) || !Number.isInteger(toStationId)) {
-      return invalidForGame('A selected segment has invalid station or line data.');
+      reasons.push(`Segment ${index + 1} has invalid station or line data.`);
+      validatedSegments.push(null);
+      continue;
     }
 
     // Match either direction against the one stored physical connection.
@@ -330,41 +342,61 @@ export async function validateRoute(gameId, userId, selectedSegments) {
     );
 
     if (!connection) {
-      return invalidForGame('A selected segment does not exist in the metro network.');
+      reasons.push(`Segment ${index + 1} does not exist in the metro network.`);
+      validatedSegments.push(null);
+      continue;
     }
 
     const physicalSegmentKey = `${lineId}-${Math.min(fromStationId, toStationId)}-${Math.max(fromStationId, toStationId)}`;
 
     if (usedPhysicalSegments.has(physicalSegmentKey)) {
-      return invalidForGame('The same physical segment cannot be used more than once.');
+      reasons.push('The same physical segment cannot be used more than once, even in reverse.');
+    } else {
+      usedPhysicalSegments.add(physicalSegmentKey);
     }
 
-    usedPhysicalSegments.add(physicalSegmentKey);
     validatedSegments.push({ lineId, fromStationId, toStationId });
   }
 
-  if (validatedSegments[0].fromStationId !== game.start_station_id) {
-    return invalidForGame('The first segment must start at the assigned start station.');
-  }
+  const firstSegment = validatedSegments[0];
+  const lastSegment = validatedSegments.at(-1);
 
-  if (validatedSegments.at(-1).toStationId !== game.destination_station_id) {
-    return invalidForGame('The last segment must end at the assigned destination station.');
+  if (firstSegment && firstSegment.fromStationId !== game.start_station_id) {
+    reasons.push('The route does not start from the assigned start station.');
   }
 
   for (let index = 1; index < validatedSegments.length; index += 1) {
     const previousSegment = validatedSegments[index - 1];
     const currentSegment = validatedSegments[index];
 
+    if (!previousSegment || !currentSegment) {
+      continue;
+    }
+
     if (previousSegment.toStationId !== currentSegment.fromStationId) {
-      return invalidForGame('Selected segments must form one continuous route.');
+      hasDisconnectedSegments = true;
+      continue;
     }
 
     if (
       previousSegment.lineId !== currentSegment.lineId &&
       !interchangeIds.has(previousSegment.toStationId)
     ) {
-      return invalidForGame('Metro lines can only be changed at an interchange station.');
+      reasons.push(`Segments ${index} and ${index + 1} change lines outside an interchange station.`);
     }
+  }
+
+  if (hasDisconnectedSegments) {
+    reasons.push('The route has disconnected segments and does not form a continuous route.');
+  }
+
+  // Reaching the wrong end station is an incomplete route only when no other issue was found.
+  if (reasons.length === 0 && (!lastSegment || lastSegment.toStationId !== game.destination_station_id)) {
+    reasons.push('The route is incomplete because it does not end at the assigned destination station.');
+  }
+
+  if (reasons.length > 0) {
+    return invalidForGame(reasons);
   }
 
   const events = await getEvents();
