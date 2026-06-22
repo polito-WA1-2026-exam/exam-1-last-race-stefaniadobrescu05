@@ -17,20 +17,28 @@ function NavigationBar() {
   return (
     <header className="navigation">
       <nav className="navigation-inner" aria-label="Main navigation">
-        <NavLink className="brand" to="/">LAST <span className="brand-mark">RACE</span></NavLink>
-        <div className="nav-links">
-          <NavLink className="nav-link" to="/instructions">Instructions</NavLink>
+        <NavLink className="brand" to="/">
+          <img className="brand-logo" src="/images/logo.png" alt="Last Race logo" />
+          <span>LAST <span className="brand-mark">RACE</span></span>
+        </NavLink>
+        <div className="nav-main-links">
+          <NavLink className="nav-link" to="/" end>Home</NavLink>
+          <NavLink className="nav-link" to="/instructions">Rules</NavLink>
           {user ? (
             <>
               <NavLink className="nav-link" to="/game">Play Game</NavLink>
               <NavLink className="nav-link" to="/ranking">Ranking</NavLink>
-              <span className="user-greeting">Hi, {user.username}</span>
-              <button className="logout-button" onClick={handleLogout} type="button">Log out</button>
             </>
           ) : (
             <NavLink className="nav-link login-link" to="/login">Log in</NavLink>
           )}
         </div>
+        {user && (
+          <div className="nav-user-actions">
+              <span className="user-greeting">Hi, {user.username}</span>
+              <button className="logout-button" onClick={handleLogout} type="button">Log out</button>
+          </div>
+        )}
       </nav>
     </header>
   )

@@ -20,8 +20,8 @@ function ExecutionPhase({ executionResult, onComplete }) {
 
   return (
     <section className="content-card game-setup-card execution-card">
-      <p className="eyebrow">Execution phase</p>
       <h1>Traveling your route.</h1>
+      <p className="execution-success">Route selected correctly.</p>
       <p className="execution-progress">Step {stepIndex + 1} of {steps.length}</p>
       <article className="execution-step-card">
         <h2>{currentStep.from} &rarr; {currentStep.to}</h2>

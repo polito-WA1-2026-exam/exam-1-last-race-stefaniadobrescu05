@@ -136,10 +136,9 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
 
   return (
     <section className="content-card game-setup-card planning-phase-card">
-      <p className="eyebrow">Planning phase</p>
       <div className="planning-header">
         <div>
-          <h1>Plan your race.</h1>
+          <h1>Plan your race</h1>
           <p className="game-intro">Review the available stations and segments before time runs out.</p>
         </div>
         <div className="planning-status">
@@ -195,15 +194,13 @@ function PlanningPhase({ game, onRouteValid, onRouteInvalid, onStartNewGame }) {
                 return [
                   <li className="segment-card" key={`${segmentKey}-forward`}>
                     <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, false)} disabled={isSelected} aria-pressed={isSelected}>
-                      <span>{segment?.from_station_name || 'Unknown'} &rarr; {segment?.to_station_name || 'Unknown'}</span>
-                      <span className="segment-line-name">{segment?.line_name || 'Metro line'}</span>
+                      <span>{segment?.from_station_name || 'Unknown'} - {segment?.to_station_name || 'Unknown'}</span>
                       {isSelected && <span className="selected-segment-note">Selected</span>}
                     </button>
                   </li>,
                   <li className="segment-card" key={`${segmentKey}-reverse`}>
                     <button className="segment-button" type="button" onClick={() => selectSegment(segment, index, true)} disabled={isSelected} aria-pressed={isSelected}>
-                      <span>{segment?.to_station_name || 'Unknown'} &rarr; {segment?.from_station_name || 'Unknown'}</span>
-                      <span className="segment-line-name">{segment?.line_name || 'Metro line'}</span>
+                      <span>{segment?.to_station_name || 'Unknown'} - {segment?.from_station_name || 'Unknown'}</span>
                       {isSelected && <span className="selected-segment-note">Selected</span>}
                     </button>
                   </li>,
@@ -246,8 +243,7 @@ function SelectedRoute({ selectedSegments, onReorder, isReorderEnabled = false }
           title={isReorderEnabled ? 'Drag to change the route order' : undefined}
         >
           {isReorderEnabled && <span className="drag-handle" aria-hidden="true">&#8942;&#8942;</span>}
-          {index + 1}. {segment.from_station_name || 'Unknown'} &rarr; {segment.to_station_name || 'Unknown'}
-          {segment.line_name ? ` (${segment.line_name})` : ''}
+          {index + 1}. {segment.from_station_name || 'Unknown'} - {segment.to_station_name || 'Unknown'}
         </li>
       ))}
     </ol>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, Route, Routes } from 'react-router-dom'
 import { UserProvider } from './contexts/UserContext'
 import Layout from './components/Layout'
 import LoginForm from './components/LoginForm'
@@ -8,10 +8,26 @@ import ExecutionPhase from './components/ExecutionPhase'
 import CoinAmount from './components/CoinAmount'
 import PlanningPhase from './components/PlanningPhase'
 import ProtectedRoute from './components/ProtectedRoute'
+import { useUser } from './contexts/UserContext'
 import './App.css'
 
 function HomePage() {
-  return <section className="hero-card"><p className="eyebrow">Welcome aboard</p><h1>Make every stop count.</h1><p className="hero-copy">Last Race is a friendly metro adventure where every connection can change your journey.</p></section>
+  const { user } = useUser()
+
+  return (
+    <>
+      <section className="hero-card">
+        <p className="eyebrow">Home</p>
+        <h1>Make every stop count.</h1>
+        <p className="hero-copy">Last Race is a friendly metro adventure where every connection can change your journey.</p>
+        <p className="home-network-note">Explore the city metro network, choose your path, and make it to your destination with the most coins.</p>
+        {user && <div className="home-actions">
+          <Link className="primary-button home-action" to="/game">Play game</Link>
+          <Link className="secondary-button home-action" to="/ranking">View ranking</Link>
+        </div>}
+      </section>
+    </>
+  )
 }
 
 function InstructionsPage() {
@@ -123,9 +139,13 @@ function GamePage() {
 
   return (
     <section className="content-card game-setup-card">
-      <p className="eyebrow">Setup phase</p>
-      <h1>Get to know the network.</h1>
-      <p className="game-intro">Review the metro lines before the race begins. Route selection will be added in a later phase.</p>
+      <h1>Get to know the network</h1>
+      {!isLoading && !error && <div className="network-summary">
+        <span>{Array.isArray(network?.stations) ? network.stations.length : 0} stations</span>
+        <span>{Array.isArray(network?.lines) ? network.lines.length : 0} lines</span>
+        <span>{Array.isArray(network?.interchangeStations) ? network.interchangeStations.length : 0} interchange stations</span>
+      </div>}
+      {!isLoading && !error && <p className="interchange-note">Double circles mark interchange stations.</p>}
       <img
         className="network-map-image"
         src="/images/network-map.png"
@@ -133,7 +153,20 @@ function GamePage() {
       />
       {isLoading && <p className="network-status">Loading the network...</p>}
       {error && <p className="form-error" role="alert">{error}</p>}
-      {!isLoading && !error && <NetworkMap network={network} />}
+      {!isLoading && !error && <>
+        <h2 className="legend-title">Legend</h2>
+        <div className="network-legend">
+          <div className="legend-item">
+            <img src="/images/interchange-station.png" alt="Interchange station double circle" />
+            <span>Interchange station</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-dash" aria-hidden="true">-</span>
+            <span>Connection available in both directions</span>
+          </div>
+        </div>
+        <NetworkMap network={network} />
+      </>}
       <button className="primary-button planning-button" type="button" onClick={startPlanning} disabled={isLoading || isStarting}>
         {isStarting ? 'Starting...' : 'Start planning'}
       </button>
